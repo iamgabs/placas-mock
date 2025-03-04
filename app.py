@@ -9,6 +9,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
 from PIL import Image
 import zipfile
+import random
 
 with open("output_recortes.json", "r") as f:
     data = json.load(f)
@@ -56,14 +57,27 @@ class DatasetNumerico(Dataset):
                 img_path = item["imagem"]
                 label = int(item["char"])
                 self.data.append((img_path, label))
+
     def __len__(self):
         return len(self.data)
+
     def __getitem__(self, idx):
         img_path, label = self.data[idx]
-        image = Image.open(img_path).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
-        return image, label
+
+        # Verifica se o arquivo existe antes de abrir
+        if not os.path.exists(img_path):
+            print(f"AVISO: Imagem não encontrada: {img_path}. Pulando...")
+            # Escolher outra amostra aleatoriamente para substituir a ausente
+            return self.__getitem__(random.randint(0, len(self.data) - 1))
+
+        try:
+            image = Image.open(img_path).convert("RGB")
+            if self.transform:
+                image = self.transform(image)
+            return image, label
+        except Exception as e:
+            print(f"Erro ao abrir {img_path}: {e}")
+            return self.__getitem__(random.randint(0, len(self.data) - 1))  # Evita erro retornando outro dado
 
 
 dataset = DatasetNumerico(num_data, transform=transform_train)
@@ -130,7 +144,7 @@ def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4
     return model
 
 # Modelo treinado com 18 épocas
-modelo_treinado = treinar_resnet18(train_loader, val_loader, num_epochs=18, learning_rate=0.005)
+modelo_treinado = treinar_resnet18(train_loader, val_loader, num_epochs=50, learning_rate=0.03)
 
 transform_inference = transforms.Compose([
     transforms.Resize((224, 224)),
