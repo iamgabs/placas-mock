@@ -144,7 +144,7 @@ def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4
     return model
 
 # Modelo treinado com 18 épocas
-modelo_treinado = treinar_resnet18(train_loader, val_loader, num_epochs=50, learning_rate=0.03)
+modelo_treinado = treinar_resnet18(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
 
 transform_inference = transforms.Compose([
     transforms.Resize((224, 224)),
