@@ -123,4 +123,4 @@ def treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
     return model
 
 # Treinar modelo
-modelo_treinado = treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
+modelo_treinado = treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=1e-3)
