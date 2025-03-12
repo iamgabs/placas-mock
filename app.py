@@ -1,4 +1,3 @@
-# importações
 import os
 import json
 import torch
@@ -8,17 +7,18 @@ from torchvision import models
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
 from PIL import Image
-import zipfile
 import random
 
+# Verifica se a GPU está disponível
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Usando dispositivo: {DEVICE}")
+
+# Carregamento do dataset
 with open("output_recortes.json", "r") as f:
     data = json.load(f)
 
-# separar o datase em outro dataset, de apenas números 0-9
 numeros_data = {}
-
 numeros_validos = {str(i) for i in range(10)}
-
 for key, values in data.items():
     numeros_filtrados = [
         item for item in values
@@ -32,44 +32,29 @@ for key, values in data.items():
 with open("output_numeros.json", "w") as f:
     json.dump(numeros_data, f, indent=4)
 
-print("Novo dataset contendo apenas números salvo como 'output_numeros.json'")
-
-with open("output_numeros.json", "r") as f:
-    num_data = json.load(f)
-
-
-# treinamento
+# Transformações para treinamento
 transform_train = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.RandomCrop((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
+# Dataset
 class DatasetNumerico(Dataset):
     def __init__(self, data, transform=None):
-        self.data = []
+        self.data = [(item["imagem"], int(item["char"])) for key, values in data.items() for item in values]
         self.transform = transform
-        for key, values in data.items():
-            for item in values:
-                img_path = item["imagem"]
-                label = int(item["char"])
-                self.data.append((img_path, label))
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         img_path, label = self.data[idx]
-
-        # Verifica se o arquivo existe antes de abrir
         if not os.path.exists(img_path):
             print(f"AVISO: Imagem não encontrada: {img_path}. Pulando...")
-            # Escolher outra amostra aleatoriamente para substituir a ausente
             return self.__getitem__(random.randint(0, len(self.data) - 1))
-
         try:
             image = Image.open(img_path).convert("RGB")
             if self.transform:
@@ -77,35 +62,29 @@ class DatasetNumerico(Dataset):
             return image, label
         except Exception as e:
             print(f"Erro ao abrir {img_path}: {e}")
-            return self.__getitem__(random.randint(0, len(self.data) - 1))  # Evita erro retornando outro dado
+            return self.__getitem__(random.randint(0, len(self.data) - 1))
 
-
-dataset = DatasetNumerico(num_data, transform=transform_train)
-
-# dividindo o dataset em 80% para treinamento e 20% para validação
-train_size = int(0.8 * len(dataset))
-val_size = len(dataset) - train_size
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+# Criar dataset
+full_dataset = DatasetNumerico(numeros_data, transform=transform_train)
+train_size = int(0.8 * len(full_dataset))
+val_size = len(full_dataset) - train_size
+train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
 batch_size = 32
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4, device=None):
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Carregar a ResNet18 pré-treinada
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+# Função de treinamento para ResNet50
+def treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1):
+    model = models.resnet50(weights=None)  # Usa ResNet50
     num_ftrs = model.fc.in_features
-    # Ajustar a camada final com ReLU e Dropout
     model.fc = nn.Sequential(
         nn.Linear(num_ftrs, 512),
         nn.ReLU(),
         nn.Dropout(0.3),
         nn.Linear(512, 10)
     )
-    model = model.to(device)
+    model = model.to(DEVICE)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -116,7 +95,7 @@ def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4
         model.train()
         running_loss = 0.0
         for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+            images, labels = images.to(DEVICE), labels.to(DEVICE)
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -129,7 +108,7 @@ def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4
         total = 0
         with torch.no_grad():
             for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
+                images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = model(images)
                 _, predicted = torch.max(outputs, 1)
                 total += labels.size(0)
@@ -138,18 +117,10 @@ def treinar_resnet18(train_loader, val_loader, num_epochs=30, learning_rate=1e-4
         print(f"Época [{epoch+1}/{num_epochs}] - Loss: {running_loss/len(train_loader):.4f} - Val Acc: {val_acc:.4f}")
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), "melhor_modelo_resnet18.pth")
+            torch.save(model.state_dict(), "melhor_modelo_resnet50.pth")
             print("Melhor modelo salvo!")
     print("Treinamento concluído!")
     return model
 
-# Modelo treinado com 18 épocas
-modelo_treinado = treinar_resnet18(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
-
-transform_inference = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
-
+# Treinar modelo
+modelo_treinado = treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
