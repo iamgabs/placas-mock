@@ -18,6 +18,7 @@ print(f"Usando dispositivo: {DEVICE}")
 with open("output_recortes.json", "r") as f:
     data = json.load(f)
 
+letras_focadas = set(["W", "H", "I", "L", "O", "G", "Q", "D", "M", "N", "F", "E", "Y", "V", "R"])
 letras_validas = list(string.ascii_letters)
 char_to_idx = {char: idx for idx, char in enumerate(letras_validas)}
 letras_data = {}
@@ -56,7 +57,7 @@ class DatasetLetras(Dataset):
             for item in values:
                 img_path = item["imagem"]
                 label = item["char"]
-                if label in char_to_idx:
+                if label in letras_focadas:
                     self.data.append((img_path, char_to_idx[label]))
 
     def __len__(self):
