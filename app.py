@@ -7,6 +7,7 @@ from torchvision import models
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
 from PIL import Image
+import string
 import random
 
 # Verifica se a GPU está disponível
@@ -17,20 +18,25 @@ print(f"Usando dispositivo: {DEVICE}")
 with open("output_recortes.json", "r") as f:
     data = json.load(f)
 
-numeros_data = {}
-numeros_validos = {str(i) for i in range(10)}
+letras_validas = list(string.ascii_letters)
+char_to_idx = {char: idx for idx, char in enumerate(letras_validas)}
+letras_data = {}
+
 for key, values in data.items():
     numeros_filtrados = [
         item for item in values
-        if item["char"] in numeros_validos
-        and "mercosul" in item["imagem"]
-        and "_min_7" not in item["imagem"]
+        if item["char"] in letras_validas and "_min_7" not in item["imagem"]
     ]
-    if numeros_filtrados:
-        numeros_data[key] = numeros_filtrados
 
-with open("output_numeros.json", "w") as f:
-    json.dump(numeros_data, f, indent=4)
+    for item in numeros_filtrados:
+        if item["char"].isdigit():
+            print(f"Erro: número encontrado -> {item}")
+
+    if numeros_filtrados:
+        letras_data[key] = numeros_filtrados
+
+with open("output_letras.json", "w") as f:
+    json.dump(letras_data, f, indent=4)
 
 # Transformações para treinamento
 transform_train = transforms.Compose([
@@ -42,19 +48,29 @@ transform_train = transforms.Compose([
 ])
 
 # Dataset
-class DatasetNumerico(Dataset):
+class DatasetLetras(Dataset):
     def __init__(self, data, transform=None):
-        self.data = [(item["imagem"], int(item["char"])) for key, values in data.items() for item in values]
+        self.data = []
         self.transform = transform
+        for key, values in data.items():
+            for item in values:
+                img_path = item["imagem"]
+                label = item["char"]
+                if label in char_to_idx:
+                    self.data.append((img_path, char_to_idx[label]))
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         img_path, label = self.data[idx]
+
+        # Verifica se o arquivo existe antes de abrir
         if not os.path.exists(img_path):
             print(f"AVISO: Imagem não encontrada: {img_path}. Pulando...")
+            # Escolher outra amostra aleatoriamente para substituir a ausente
             return self.__getitem__(random.randint(0, len(self.data) - 1))
+
         try:
             image = Image.open(img_path).convert("RGB")
             if self.transform:
@@ -64,15 +80,20 @@ class DatasetNumerico(Dataset):
             print(f"Erro ao abrir {img_path}: {e}")
             return self.__getitem__(random.randint(0, len(self.data) - 1))
 
-# Criar dataset
-full_dataset = DatasetNumerico(numeros_data, transform=transform_train)
-train_size = int(0.8 * len(full_dataset))
-val_size = len(full_dataset) - train_size
-train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+dataset = DatasetLetras(str_data, transform=transform_train)
+
+"""## Divisão da base de dados para treinamento e validação"""
+
+# dividindo o dataset em 80% para treinamento e 20% para validação
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
 batch_size = 32
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+"""## Treinar a rede neural"""
 
 # Função de treinamento para ResNet50
 def treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1):
@@ -82,7 +103,7 @@ def treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
         nn.Linear(num_ftrs, 512),
         nn.ReLU(),
         nn.Dropout(0.3),
-        nn.Linear(512, 10)
+        nn.Linear(512, len(letras_validas))
     )
     model = model.to(DEVICE)
 
@@ -117,7 +138,7 @@ def treinar_resnet50(train_loader, val_loader, num_epochs=50, learning_rate=0.1)
         print(f"Época [{epoch+1}/{num_epochs}] - Loss: {running_loss/len(train_loader):.4f} - Val Acc: {val_acc:.4f}")
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), "melhor_modelo_resnet50.pth")
+            torch.save(model.state_dict(), "melhor_modelo_resnet50_letras_geral.pth")
             print("Melhor modelo salvo!")
     print("Treinamento concluído!")
     return model
